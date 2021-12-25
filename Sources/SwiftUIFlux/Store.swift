@@ -23,7 +23,8 @@ final public class Store<StoreState: FluxState>: ObservableObject {
         self.state = state
         
         var middleware = middleware
-        middleware.append(asyncActionsMiddleware)
+		middleware.append(asyncActionsMiddleware)
+		middleware.append(effectActionsMiddleware)
         self.dispatchFunction = middleware
             .reversed()
             .reduce(
@@ -35,11 +36,16 @@ final public class Store<StoreState: FluxState>: ObservableObject {
                     return middleware(dispatch, getState)(dispatchFunction)
             })
     }
+	
+	/// must to use a queue, or actions would be disordered
+	private var dispatchQueue = DispatchQueue(label: "reduxDispatchQ", qos: .userInteractive, attributes: [], autoreleaseFrequency: .workItem, target: .main)
 
     public func dispatch(action: Action) {
-        DispatchQueue.main.async {
-            self.dispatchFunction(action)
-        }
+		/// check out the issue: https://github.com/Dimillian/SwiftUIFlux/issues/18
+		DispatchQueue.main.async {
+			self.objectWillChange.send() // use this to fix inconsistent state, more investigation needed.
+			self.dispatchFunction(action)
+		}
     }
     
     private func _dispatch(action: Action) {

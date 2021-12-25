@@ -26,3 +26,16 @@ public extension ConnectedView {
         return StoreConnector(content: render)
     }
 }
+
+//public protocol PerfConnectedView: ConnectedView, Equatable where Props : Equatable {
+//
+//	var lastProps: Props? { get set }
+//
+//}
+//
+//extension PerfConnectedView  {
+//
+//	static func == (lhs: Self, rhs: Self) -> Bool {
+//		return lhs.lastProps == rhs.lastProps
+//	}
+//}
