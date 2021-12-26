@@ -14,34 +14,16 @@ internal class EffectDispatchManager {
 	}()
 	
 	var effectCompletionNotifiers = [EffectAction: DispatchSemaphore]()
+	var effectErrors = [EffectAction: Error?]()
 }
 
 
-public typealias EffectDispatchFunction = (_ effect: EffectAction) async throws -> Void
+/// EffectDispatch is async, will return new state after executed
+public typealias EffectDispatchFunction = (_ effect: EffectAction) async throws -> FluxState?
 
 public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState in
 	
-	let effectDispatch: EffectDispatchFunction = { (effect) async throws -> Void in
-		let mutex = DispatchSemaphore(value: 0)
-		EffectDispatchManager.shared.effectCompletionNotifiers[effect] = mutex
-		
-		dispatch(effect) // dispatch in regular wait
-		
-		let _ = await withCheckedContinuation { (continuation: CheckedContinuation<Int, Never>) in
-			// Use another DispatchQueue for the job, or it will blocking main queue.
-			DispatchQueue.global().async {
-				//
-				if let mutex = EffectDispatchManager.shared.effectCompletionNotifiers[effect] {
-					print("Now waiting at mutex.wait()")
-					mutex.wait()
-					print("after mutex.wait(), removing mutex")
-					EffectDispatchManager.shared.effectCompletionNotifiers.removeValue(forKey: effect)
-				}
-				continuation.resume(returning: 1)
-			}
-		}
-	}
-
+	let effectDispatch = getEffectDispatch(dispatch: dispatch, getState: getState)
 	
 	return { next in
 		return { action in
@@ -58,7 +40,9 @@ public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState
 					effect.completed(error: anyError)
 					print("effect completed")
 					if let mutex = EffectDispatchManager.shared.effectCompletionNotifiers[effect] {
-						print("mutex.signal()")
+						// if there is a effectDispatch waiting, passing error if any, and signal it
+						EffectDispatchManager.shared.effectErrors[effect] = anyError
+						print("mutex.signal()", type(of: effect))
 						mutex.signal()
 					}
 				}
@@ -70,5 +54,45 @@ public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState
 
 
 
+internal func getEffectDispatch(dispatch: @escaping DispatchFunction, getState: @escaping () -> FluxState?) -> EffectDispatchFunction {
+	
+	let effectDispatch: EffectDispatchFunction = { (effect) async throws -> FluxState? in
+		let mutex = DispatchSemaphore(value: 0)
+		EffectDispatchManager.shared.effectCompletionNotifiers[effect] = mutex
+		
+		dispatch(effect) // dispatch in regular wait
+		
+		return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<FluxState?, Error>) in
+			// Use another DispatchQueue for the job, or it will blocking main queue.
+			DispatchQueue.global().async {
+				//
+				if let mutex = EffectDispatchManager.shared.effectCompletionNotifiers[effect] {
+					print("Now waiting at mutex.wait()")
+					mutex.wait()
+					print("after mutex.wait(), removing mutex", type(of: effect))
+					EffectDispatchManager.shared.effectCompletionNotifiers.removeValue(forKey: effect)
+				}
+				if let anyError = EffectDispatchManager.shared.effectErrors[effect], let error = anyError {
+					continuation.resume(throwing: error)
+					EffectDispatchManager.shared.effectErrors.removeValue(forKey: effect)
+				} else {
+					continuation.resume(returning: getState())
+				}
+			}
+		}
+	}
+	
+	return effectDispatch
+}
 
 
+extension Store {
+	
+	func effectDispatch(_ effect: EffectAction) async throws -> FluxState? {
+		let dispatch: (Action) -> Void = { [weak self] in self?.dispatch(action: $0) }
+		let getState = { [weak self] in self?.state }
+		
+		let effectDispatch = getEffectDispatch(dispatch: dispatch, getState: getState)
+		return try await effectDispatch(effect)
+	}
+}

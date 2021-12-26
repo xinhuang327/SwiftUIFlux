@@ -11,7 +11,7 @@ import Foundation
 /// `execute` will be called after `Reducer` processed
 public class EffectAction: NSObject, Action {
 	
-	open func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async throws {
+	@discardableResult open func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async throws {
 		
 	}
 	

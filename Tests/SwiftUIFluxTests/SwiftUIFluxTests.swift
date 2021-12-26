@@ -51,7 +51,10 @@ class TestEffect: EffectAction {
 	override func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async throws {
 		print("Now sleep for \(sleepInSecond) seconds")
 		try await Task.sleep(seconds: sleepInSecond)
-		try await effectDispatch(CountingEffect(intervalInSecond: 1, count: 10, name: "SUB"))
+		let _ = try await effectDispatch(CountingEffect(intervalInSecond: 1, count: 5, name: "SUB"))
+		if let error = error {
+			throw error
+		}
 		print("==== Message should be print after SUB counting finished.", message)
 	}
 }
@@ -105,14 +108,15 @@ final class SwiftUIFluxTests: XCTestCase {
 		}
 	}
 	
-	func testEffectAction() {
+	/// Test async-await with `EffectAction`
+	func testEffectAction() async {
 		
 		let expectation = expectation(description: "effect works")
 		
 		XCTAssert(store.state.count == 0, "Initial state is not valid")
-		store.dispatch(action: TestEffect(sleepInSecond: 3, message: "hello from the other side, \(Date())", error: TestError(errorMessage: "My Err Msg")))
-		store.dispatch(action: TestEffect(sleepInSecond: 2, message: "hello from the this side, \(Date())", error: nil))
-		store.dispatch(action: CountingEffect(intervalInSecond: 1, count: 3, name: "ROOT"))
+		let _  = try! await store.effectDispatch(TestEffect(sleepInSecond: 3, message: "hello from the other side, \(Date())", error: TestError(errorMessage: "My Err Msg")))
+//		store.dispatch(action: TestEffect(sleepInSecond: 2, message: "hello from the this side, \(Date())", error: nil))
+//		store.dispatch(action: CountingEffect(intervalInSecond: 1, count: 3, name: "ROOT"))
 		print("Actions all dispatched")
 			
 		wait(for: [expectation], timeout: 100)
