@@ -22,10 +22,12 @@ internal class EffectDispatchManager {
 /// is async, will return new state after executed
 public typealias EffectDispatchFunction = (_ effect: EffectActionBase) async -> (Any?, Error?)
 
+public typealias EffectDispatchFunctionStrongTyped<Output> = (_ effect: EffectAction<Output>) async -> (Output?, Error?)
+
 
 public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState in
 	
-	let effectDispatch = getEffectDispatch(dispatch: dispatch, getState: getState)
+	let effectDispatch = getEffectDispatch(dispatch: dispatch)
 	
 	return { next in
 		return { action in
@@ -52,7 +54,7 @@ public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState
 
 
 
-internal func getEffectDispatch(dispatch: @escaping DispatchFunction, getState: @escaping () -> FluxState?) -> EffectDispatchFunction {
+internal func getEffectDispatch(dispatch: @escaping DispatchFunction) -> EffectDispatchFunction {
 	
 	let effectDispatch: EffectDispatchFunction = { (effect) async -> (Any?, Error?) in
 		
@@ -90,13 +92,38 @@ internal func getEffectDispatch(dispatch: @escaping DispatchFunction, getState: 
 }
 
 
+// Mapping effectDispatch to strong typed one
+internal func getEffectDispatchStrongTyped<T>(forEffect: EffectAction<T>, _ effectDispatch: @escaping EffectDispatchFunction) -> EffectDispatchFunctionStrongTyped<T> {
+	
+	return { (_ effect: EffectAction<T>) async -> (T?, Error?) in
+		
+		let (out, err) = await effectDispatch(effect)
+		if out != nil {
+			return (out! as? T, err)
+		} else {
+			return (nil, err)
+		}
+		
+	}
+}
+
+
 extension Store {
 	
 	func effectDispatch(_ effect: EffectActionBase) async -> (Any?, Error?) {
 		let dispatch: (Action) -> Void = { [weak self] in self?.dispatch(action: $0) }
 		let getState = { [weak self] in self?.state }
 		
-		let effectDispatch = getEffectDispatch(dispatch: dispatch, getState: getState)
+		let effectDispatch = getEffectDispatch(dispatch: dispatch)
 		return await effectDispatch(effect)
+	}
+	
+	func effectDispatchStrongTyped<Output>(_ effect: EffectAction<Output>) async -> (Output?, Error?) {
+		let dispatch: (Action) -> Void = { [weak self] in self?.dispatch(action: $0) }
+		let getState = { [weak self] in self?.state }
+		
+		let effectDispatch = getEffectDispatch(dispatch: dispatch)
+		let strongTypedEffectDispatcher = StrongTypedEffectDispatcher(effectDispatch: effectDispatch)
+		return await strongTypedEffectDispatcher.dispatch(effect)
 	}
 }

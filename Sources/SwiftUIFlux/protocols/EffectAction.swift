@@ -7,6 +7,49 @@
 
 import Foundation
 
+/// Demo usage of strong typed EffectAction<String>
+class SomeEffectReturnsString: EffectAction<String> {
+	
+	override func executeStrongTyped(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: StrongTypedEffectDispatcher) async -> (String?, Error?) {
+		return ("Good", nil)
+	}
+	
+}
+
+open class StrongTypedEffectDispatcher {
+	
+	var effectDispatch: EffectDispatchFunction
+	
+	public init(effectDispatch: @escaping EffectDispatchFunction) {
+		self.effectDispatch = effectDispatch
+	}
+	
+	public init(_ dispatch: @escaping DispatchFunction) {
+		self.effectDispatch = getEffectDispatch(dispatch: dispatch)
+	}
+	
+	open func dispatch<T>(_ effect: EffectAction<T>) async -> (T?, Error?) {
+		let effectDispatchStrongTyped = getEffectDispatchStrongTyped(forEffect: effect, effectDispatch)
+		return await effectDispatchStrongTyped(effect)
+	}
+	
+	open func dispatchAny(_ effect: EffectActionBase) async -> (Any?, Error?) {
+		return await effectDispatch(effect)
+	}
+}
+
+open class EffectAction<Output>: EffectActionBase {
+	
+	open override func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async -> (Any?, Error?) {
+		return await executeStrongTyped(state: state, dispatch: dispatch, effectDispatch: StrongTypedEffectDispatcher(effectDispatch: effectDispatch))
+	}
+	
+	open func executeStrongTyped(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: StrongTypedEffectDispatcher) async -> (Output?, Error?) {
+		// dispatch sub effects:
+		// dispatcher.dispatch(SomeEffect())
+		return (nil, nil)
+	}
+}
 
 /// Action that support async function
 /// `execute` will be called after `Reducer` processed
