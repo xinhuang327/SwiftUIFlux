@@ -18,8 +18,11 @@ internal class EffectDispatchManager {
 }
 
 
-/// EffectDispatch is async, will return new state after executed
+/// is async, will return new state after executed
 public typealias EffectDispatchFunction = (_ effect: EffectAction) async throws -> FluxState?
+
+/// is async, will return Generic type `Output` after executed
+//public typealias OutputEffectDispatchFunction<Output> = (_ effect: EffectAction) async throws -> FluxState?
 
 public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState in
 	

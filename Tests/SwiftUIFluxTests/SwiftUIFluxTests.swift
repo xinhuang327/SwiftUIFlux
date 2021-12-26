@@ -10,10 +10,6 @@ struct TestState: FluxState {
 
 struct IncrementAction: Action { }
 
-struct TestError: Error {
-	let errorMessage: String
-}
-
 class CountingEffect: EffectAction {
 	
 	internal init(intervalInSecond: Double, count: Int, name: String) {
@@ -114,7 +110,7 @@ final class SwiftUIFluxTests: XCTestCase {
 		let expectation = expectation(description: "effect works")
 		
 		XCTAssert(store.state.count == 0, "Initial state is not valid")
-		let _  = try! await store.effectDispatch(TestEffect(sleepInSecond: 3, message: "hello from the other side, \(Date())", error: TestError(errorMessage: "My Err Msg")))
+		let _  = try! await store.effectDispatch(TestEffect(sleepInSecond: 3, message: "hello from the other side, \(Date())", error: SimpleError(errorMessage: "My Err Msg")))
 //		store.dispatch(action: TestEffect(sleepInSecond: 2, message: "hello from the this side, \(Date())", error: nil))
 //		store.dispatch(action: CountingEffect(intervalInSecond: 1, count: 3, name: "ROOT"))
 		print("Actions all dispatched")
