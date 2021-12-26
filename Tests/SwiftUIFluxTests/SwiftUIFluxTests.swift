@@ -10,7 +10,7 @@ struct TestState: FluxState {
 
 struct IncrementAction: Action { }
 
-class CountingEffect: EffectAction {
+class CountingEffect: EffectActionBase {
 	
 	internal init(intervalInSecond: Double, count: Int, name: String) {
 		self.intervalInSecond = intervalInSecond
@@ -22,16 +22,16 @@ class CountingEffect: EffectAction {
 	let count: Int
 	let name: String
 	
-	
-	override func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async throws {
+	override func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async -> (Any?, Error?) {
 		for i in 0..<count {
 			print("\(name) Counting... \(i)")
-			try await Task.sleep(seconds: intervalInSecond)
+			try! await Task.sleep(seconds: intervalInSecond)
 		}
+		return (count*count, nil)
 	}
 }
 
-class TestEffect: EffectAction {
+class TestEffect: EffectActionBase {
 	
 	internal init(sleepInSecond: Double, message: String, error: Error?) {
 		self.sleepInSecond = sleepInSecond
@@ -44,14 +44,26 @@ class TestEffect: EffectAction {
 	let message: String
 	let error: Error?
 	
-	override func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async throws {
+	override func execute(state: FluxState?, dispatch: @escaping DispatchFunction, effectDispatch: @escaping EffectDispatchFunction) async -> (Any?, Error?) {
 		print("Now sleep for \(sleepInSecond) seconds")
-		try await Task.sleep(seconds: sleepInSecond)
-		let _ = try await effectDispatch(CountingEffect(intervalInSecond: 1, count: 5, name: "SUB"))
+		try! await Task.sleep(seconds: sleepInSecond)
+		let count = Int(sleepInSecond)
+		let (out, err) = await effectDispatch(CountingEffect(intervalInSecond: 0.3, count: count, name: "SUB"))
+		XCTAssert(err == nil)
+		if let outNumber = out! as? Int {
+			XCTAssert(outNumber == count * count)
+		} else {
+			XCTFail("CountingEffect output is wrong")
+		}
 		if let error = error {
-			throw error
+			return (nil, error)
 		}
 		print("==== Message should be print after SUB counting finished.", message)
+		return (message.uppercased(), nil)
+	}
+	
+	override func completed(output: Any?, error: Error?) {
+		print("TestEffect completed: \(String(describing: output)), \(String(describing: error))")
 	}
 }
 
@@ -107,15 +119,35 @@ final class SwiftUIFluxTests: XCTestCase {
 	/// Test async-await with `EffectAction`
 	func testEffectAction() async {
 		
-		let expectation = expectation(description: "effect works")
+		
+		let msg = "hello from the other side"
+		let errorMsg = "My Err Msg"
 		
 		XCTAssert(store.state.count == 0, "Initial state is not valid")
-		let _  = try! await store.effectDispatch(TestEffect(sleepInSecond: 3, message: "hello from the other side, \(Date())", error: SimpleError(errorMessage: "My Err Msg")))
-//		store.dispatch(action: TestEffect(sleepInSecond: 2, message: "hello from the this side, \(Date())", error: nil))
-//		store.dispatch(action: CountingEffect(intervalInSecond: 1, count: 3, name: "ROOT"))
+		let (out1, err1)  = await store.effectDispatch(TestEffect(sleepInSecond: 2, message: msg, error: SimpleError(errorMessage: errorMsg)))
+		XCTAssert(out1 == nil)
+		XCTAssert(err1 != nil)
+		if let simpleErr = err1! as? SimpleError {
+			XCTAssert(simpleErr.errorMessage == errorMsg)
+		} else {
+			XCTFail("Should returns the error")
+		}
+		
+		let (out2, err2)  = await store.effectDispatch(TestEffect(sleepInSecond: 4, message: msg, error: nil))
+		XCTAssert(err2 == nil)
+		XCTAssert(out2 != nil)
+		if let str = out2! as? String {
+			XCTAssert(str == msg.uppercased())
+		} else {
+			XCTFail("Should returns the string")
+		}
+		
+		let (out3, err3) = await store.effectDispatch(ThrowErrorEffect())
+		XCTAssert(out3 == nil)
+		XCTAssert(err3 != nil)
+		
 		print("Actions all dispatched")
 			
-		wait(for: [expectation], timeout: 100)
 	}
     
     func testViewProps() {

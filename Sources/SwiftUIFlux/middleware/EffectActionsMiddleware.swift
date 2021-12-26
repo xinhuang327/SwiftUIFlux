@@ -13,16 +13,15 @@ internal class EffectDispatchManager {
 		return EffectDispatchManager()
 	}()
 	
-	var effectCompletionNotifiers = [EffectAction: DispatchSemaphore]()
-	var effectErrors = [EffectAction: Error?]()
+	var effectCompletionNotifiers = [NSObject: DispatchSemaphore]()
+	var effectOutputs = [NSObject: Any?]()
+	var effectErrors = [NSObject: Error?]()
 }
 
 
 /// is async, will return new state after executed
-public typealias EffectDispatchFunction = (_ effect: EffectAction) async throws -> FluxState?
+public typealias EffectDispatchFunction = (_ effect: EffectActionBase) async -> (Any?, Error?)
 
-/// is async, will return Generic type `Output` after executed
-//public typealias OutputEffectDispatchFunction<Output> = (_ effect: EffectAction) async throws -> FluxState?
 
 public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState in
 	
@@ -30,20 +29,16 @@ public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState
 	
 	return { next in
 		return { action in
-			if let effect = action as? EffectAction {
+			if let effect = action as? EffectActionBase {
 				print("before \(effect) async Task")
 				Task {
 					print("In effect \(effect) async Task")
-					var anyError: Error?
-					do {
-						try await effect.execute(state: getState(), dispatch: dispatch, effectDispatch: effectDispatch)
-					} catch {
-						anyError = error
-					}
-					effect.completed(error: anyError)
+					let (anyOutput, anyError) = await effect.execute(state: getState(), dispatch: dispatch, effectDispatch: effectDispatch)
+					effect.completed(output: anyOutput, error: anyError)
 					print("effect completed")
 					if let mutex = EffectDispatchManager.shared.effectCompletionNotifiers[effect] {
 						// if there is a effectDispatch waiting, passing error if any, and signal it
+						EffectDispatchManager.shared.effectOutputs[effect] = anyOutput
 						EffectDispatchManager.shared.effectErrors[effect] = anyError
 						print("mutex.signal()", type(of: effect))
 						mutex.signal()
@@ -59,13 +54,14 @@ public let effectActionsMiddleware: Middleware<FluxState> = { dispatch, getState
 
 internal func getEffectDispatch(dispatch: @escaping DispatchFunction, getState: @escaping () -> FluxState?) -> EffectDispatchFunction {
 	
-	let effectDispatch: EffectDispatchFunction = { (effect) async throws -> FluxState? in
+	let effectDispatch: EffectDispatchFunction = { (effect) async -> (Any?, Error?) in
+		
 		let mutex = DispatchSemaphore(value: 0)
 		EffectDispatchManager.shared.effectCompletionNotifiers[effect] = mutex
 		
 		dispatch(effect) // dispatch in regular wait
 		
-		return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<FluxState?, Error>) in
+		return await withCheckedContinuation { (continuation) in
 			// Use another DispatchQueue for the job, or it will blocking main queue.
 			DispatchQueue.global().async {
 				//
@@ -75,12 +71,17 @@ internal func getEffectDispatch(dispatch: @escaping DispatchFunction, getState: 
 					print("after mutex.wait(), removing mutex", type(of: effect))
 					EffectDispatchManager.shared.effectCompletionNotifiers.removeValue(forKey: effect)
 				}
-				if let anyError = EffectDispatchManager.shared.effectErrors[effect], let error = anyError {
-					continuation.resume(throwing: error)
-					EffectDispatchManager.shared.effectErrors.removeValue(forKey: effect)
-				} else {
-					continuation.resume(returning: getState())
+				if let anyOutput = EffectDispatchManager.shared.effectOutputs[effect], let anyError = EffectDispatchManager.shared.effectErrors[effect] {
+					// NOTE: anyOutput is Optional<Any>, anyOutput is Optional<Error>
+					continuation.resume(returning: (anyOutput, anyError))
 				}
+				EffectDispatchManager.shared.effectOutputs.removeValue(forKey: effect)
+				EffectDispatchManager.shared.effectErrors.removeValue(forKey: effect)
+				
+				print("EffectDispatchManager.shared.effectCompletionNotifiers.count", EffectDispatchManager.shared.effectCompletionNotifiers.count)
+				print("EffectDispatchManager.shared.effectOutputs.count", EffectDispatchManager.shared.effectOutputs.count)
+				print("EffectDispatchManager.shared.effectErrors.count", EffectDispatchManager.shared.effectErrors.count)
+				
 			}
 		}
 	}
@@ -91,11 +92,11 @@ internal func getEffectDispatch(dispatch: @escaping DispatchFunction, getState: 
 
 extension Store {
 	
-	func effectDispatch(_ effect: EffectAction) async throws -> FluxState? {
+	func effectDispatch(_ effect: EffectActionBase) async -> (Any?, Error?) {
 		let dispatch: (Action) -> Void = { [weak self] in self?.dispatch(action: $0) }
 		let getState = { [weak self] in self?.state }
 		
 		let effectDispatch = getEffectDispatch(dispatch: dispatch, getState: getState)
-		return try await effectDispatch(effect)
+		return await effectDispatch(effect)
 	}
 }
